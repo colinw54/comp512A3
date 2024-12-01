@@ -100,9 +100,14 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 
 	void registerAsWorker() throws UnknownHostException, KeeperException, InterruptedException
 	{
+		//Create a new workernode under /dist20/workers 
+		String nodeName = zk.create("/dist20/workers/worker-", pinfo.getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+		
+		//Create a new znode to monitor this worker's STATUS and INCOMING TASK?
+		String workerMonitor = zk.create(nodeName + "/state", "idle".getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
 
-		String nodeName = zk.create("/dist20/workers/worker-", pinfo.getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
-		System.out.println("New worker created: " + nodeName);
+		System.out.println("New worker created: " + nodeName + " with a state at " + workerMonitor);
+		
 
 	}
 
