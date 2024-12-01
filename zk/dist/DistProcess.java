@@ -35,6 +35,9 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 	String zkServer, pinfo;
 	boolean isManager=false;
 	boolean initialized=false;
+	
+	//List of workers if we are the manager
+	private List<String> workers = new ArrayList<>();
 
 	DistProcess(String zkhost)
 	{
@@ -57,6 +60,7 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 			isManager=true;
 			getTasks(); // Install monitoring on any new tasks that will be created.
 			// TODO monitor for worker tasks?
+			monitorWorkers();
 
 		}catch(NodeExistsException nee)
 		{ 
@@ -102,6 +106,10 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 
 	}
 
+	void monitorWorkers() {
+		zk.getChildren("/dist20/workers", this, this, null);
+	}
+
 	public void process(WatchedEvent e)
 	{
 		//Get watcher notifications.
@@ -132,7 +140,10 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 			// There has been changes to the children of the node.
 			// We are going to re-install the Watch as well as request for the list of the children.
 			getTasks();
-		}
+		} else if (e.getType() == Watcher.Event.EventType.NodeChildrenChanged && e.getPath().equals("/dist20/workers")) {
+			//If there has been a change to the workers, re-install the watch
+            monitorWorkers(); 
+        }
 	}
 
 	//Asynchronous callback that is invoked by the zk.getChildren request.
@@ -155,41 +166,49 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 		//		The worker must invoke the "compute" function of the Task send by the client.
 		//What to do if you do not have a free worker process?
 		System.out.println("DISTAPP : processResult : " + rc + ":" + path + ":" + ctx);
-		for(String c: children)
-		{
-			System.out.println(c);
-			try
+
+		if (path.equals("/dist20/tasks")){
+			for(String c: children)
 			{
-				//TODO There is quite a bit of worker specific activities here,
-				// that should be moved done by a process function as the worker.
+				System.out.println(c);
+				try
+				{
+					//TODO There is quite a bit of worker specific activities here,
+					// that should be moved done by a process function as the worker.
 
-				//TODO!! This is not a good approach, you should get the data using an async version of the API.
-				byte[] taskSerial = zk.getData("/dist20/tasks/"+c, false, null);
+					//TODO!! This is not a good approach, you should get the data using an async version of the API.
+					byte[] taskSerial = zk.getData("/dist20/tasks/"+c, false, null);
 
-				// Re-construct our task object.
-				ByteArrayInputStream bis = new ByteArrayInputStream(taskSerial);
-				ObjectInput in = new ObjectInputStream(bis);
-				DistTask dt = (DistTask) in.readObject();
+					// Re-construct our task object.
+					ByteArrayInputStream bis = new ByteArrayInputStream(taskSerial);
+					ObjectInput in = new ObjectInputStream(bis);
+					DistTask dt = (DistTask) in.readObject();
 
-				//Execute the task.
-				//TODO: Again, time consuming stuff. Should be done by some other thread and not inside a callback!
-				dt.compute();
-				
-				// Serialize our Task object back to a byte array!
-				ByteArrayOutputStream bos = new ByteArrayOutputStream();
-				ObjectOutputStream oos = new ObjectOutputStream(bos);
-				oos.writeObject(dt); oos.flush();
-				taskSerial = bos.toByteArray();
+					//Execute the task.
+					//TODO: Again, time consuming stuff. Should be done by some other thread and not inside a callback!
+					dt.compute();
+					
+					// Serialize our Task object back to a byte array!
+					ByteArrayOutputStream bos = new ByteArrayOutputStream();
+					ObjectOutputStream oos = new ObjectOutputStream(bos);
+					oos.writeObject(dt); oos.flush();
+					taskSerial = bos.toByteArray();
 
-				// Store it inside the result node.
-				zk.create("/dist20/tasks/"+c+"/result", taskSerial, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-				//zk.create("/dist20/tasks/"+c+"/result", ("Hello from "+pinfo).getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+					// Store it inside the result node.
+					zk.create("/dist20/tasks/"+c+"/result", taskSerial, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+					//zk.create("/dist20/tasks/"+c+"/result", ("Hello from "+pinfo).getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+				}
+				catch(NodeExistsException nee){System.out.println(nee);}
+				catch(KeeperException ke){System.out.println(ke);}
+				catch(InterruptedException ie){System.out.println(ie);}
+				catch(IOException io){System.out.println(io);}
+				catch(ClassNotFoundException cne){System.out.println(cne);}
 			}
-			catch(NodeExistsException nee){System.out.println(nee);}
-			catch(KeeperException ke){System.out.println(ke);}
-			catch(InterruptedException ie){System.out.println(ie);}
-			catch(IOException io){System.out.println(io);}
-			catch(ClassNotFoundException cne){System.out.println(cne);}
+		} else if (path.equals("/dist20/workers")){
+			//If there has been a change in workers, update the list of workers that the manager has
+			workers.clear();
+			workers.addAll(children);
+			System.out.println("The worker list has been updated: " + workers);
 		}
 	}
 
