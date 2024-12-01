@@ -173,11 +173,55 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 		System.out.println("DISTAPP : processResult : " + rc + ":" + path + ":" + ctx);
 
 		if (path.equals("/dist20/tasks")){
-			for(String c: children)
+
+			if (children.isEmpty()) {
+				return; // No tasks to assign
+			}
+			//Ensures it's processed sequentially
+			Collections.sort(children);
+
+			for(String task: children)
 			{
-				System.out.println(c);
-				try
-				{
+				System.out.println(task);
+				boolean isAssigned = false;
+	
+					//Attempt to assign the task to a free worker. If unsuccessful, wait a second, check for new workers, and re-try (this allows for new workers to come in)
+					synchronized(workers) {
+						for (String worker: workers){
+							//Check if it's idle
+							try {
+								byte[] state = zk.getData("/dist20/workers/" + worker + "/state", false, null);
+								
+								if (new String(state).equals("idle")){
+									isAssigned = true;
+									byte[] taskInfo = zk.getData("/dist20/tasks/"+task, false, null);
+
+									//Assign to the free worker and remove from task list
+									zk.setData("/dist20/workers/" + worker + "/state", "busy".getBytes(), -1);
+									zk.create("/dist20/workers/" + worker + "/task", taskInfo, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+									zk.delete("/dist20/tasks/" + task, -1); 
+
+									System.out.println("Task have been asssigned: " + task + " to worker: " + worker);
+									break;
+								}
+
+							} catch (Exception e){
+								System.out.println("There was a problem checking the current worker");
+							}
+
+						}
+					}
+
+					if (!isAssigned){
+						System.out.println("No worker was available.");
+						//TODO: Add mechanism for updating worker list. Maybe remove from tasks and add back?
+					}
+
+
+
+
+
+					/* 
 					//TODO There is quite a bit of worker specific activities here,
 					// that should be moved done by a process function as the worker.
 
@@ -202,12 +246,15 @@ public class DistProcess implements Watcher, AsyncCallback.ChildrenCallback
 					// Store it inside the result node.
 					zk.create("/dist20/tasks/"+c+"/result", taskSerial, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
 					//zk.create("/dist20/tasks/"+c+"/result", ("Hello from "+pinfo).getBytes(), Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-				}
+					*/
+				
+				/* 
 				catch(NodeExistsException nee){System.out.println(nee);}
 				catch(KeeperException ke){System.out.println(ke);}
 				catch(InterruptedException ie){System.out.println(ie);}
 				catch(IOException io){System.out.println(io);}
 				catch(ClassNotFoundException cne){System.out.println(cne);}
+				*/
 			}
 		} else if (path.equals("/dist20/workers")){
 			//If there has been a change in workers, update the list of workers that the manager has
